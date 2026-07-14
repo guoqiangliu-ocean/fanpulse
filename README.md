@@ -160,7 +160,7 @@ and odds snapshots by fixture ID would accelerate second-screen products.
 
 - Independent FanPulse product: complete and validated
 - Public repository: [github.com/guoqiangliu-ocean/fanpulse](https://github.com/guoqiangliu-ocean/fanpulse)
-- Public deployment: pending publication
+- Public deployment: [fanpulse-world-cup.oddpulse-txline-2026.workers.dev](https://fanpulse-world-cup.oddpulse-txline-2026.workers.dev/)
 - Separate demo video: pending recording
 - Superteam Consumer and Fan Experiences submission: not submitted
 
