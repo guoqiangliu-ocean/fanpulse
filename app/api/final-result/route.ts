@@ -38,10 +38,12 @@ async function loadResolution(
   const response = await fetch(evidenceUrl, {
     headers: { Accept: "application/json" },
     cache: "no-store",
-    redirect: "error",
+    redirect: "manual",
     signal: AbortSignal.timeout(12_000),
   });
-  if (!response.ok) throw new Error("SETTLETRACE_HTTP_ERROR");
+  if (!response.ok || response.status >= 300) {
+    throw new Error("SETTLETRACE_HTTP_ERROR");
+  }
   return { body: (await response.json()) as unknown, evidenceUrl };
 }
 

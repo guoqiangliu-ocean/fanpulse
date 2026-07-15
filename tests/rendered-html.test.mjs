@@ -33,7 +33,7 @@ test("keeps TxLINE credentials behind the server route", async () => {
   assert.match(client, /\/api\/final-result/);
   assert.doesNotMatch(client, /SETTLETRACE_ORIGIN|settletrace\.oddpulse/);
   assert.match(finalResultRoute, /verifySettleTraceReceiptIntegrity/);
-  assert.match(finalResultRoute, /redirect: "error"/);
+  assert.match(finalResultRoute, /redirect: "manual"/);
   assert.doesNotMatch(finalResultRoute, /TXLINE_API_TOKEN|TXLINE_SESSION_JWT/);
   assert.match(envExample, /^TXLINE_API_TOKEN=\s*$/m);
   assert.match(gitignore, /^\.env\*$/m);

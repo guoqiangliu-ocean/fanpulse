@@ -160,10 +160,12 @@ test("retries the resolved market with the actual winner and returns only the ve
     outcome: "WIN",
   });
   const calls: string[] = [];
+  const redirectModes: (RequestRedirect | undefined)[] = [];
   const response = await withFetch(
-    async (input) => {
+    async (input, init) => {
       const url = new URL(String(input));
       calls.push(url.searchParams.get("selection") ?? "");
+      redirectModes.push(init?.redirect);
       return new Response(JSON.stringify(calls.length === 1 ? first : second), { status: 200 });
     },
     () => GET(new Request("https://fanpulse.example/api/final-result?fixtureId=42")),
@@ -172,6 +174,7 @@ test("retries the resolved market with the actual winner and returns only the ve
     verification: { status: string; winner: string; receiptHash: string };
   };
   assert.deepEqual(calls, ["participant1", "participant2"]);
+  assert.deepEqual(redirectModes, ["manual", "manual"]);
   assert.equal(body.verification.status, "verified");
   assert.equal(body.verification.winner, "participant2");
   assert.match(body.verification.receiptHash, /^[a-f0-9]{64}$/);
