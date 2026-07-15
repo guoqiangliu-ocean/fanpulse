@@ -190,6 +190,6 @@ test("hides upstream failures behind a stable public error", async () => {
   );
   assert.equal(response.status, 502);
   const body = await response.text();
-  assert.match(body, /RESULT_SOURCE_UNAVAILABLE/);
+  assert.match(body, /RESULT_INITIAL_RESOLUTION_FAILED/);
   assert.doesNotMatch(body, /secret detail/);
 });

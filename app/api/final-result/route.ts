@@ -64,15 +64,20 @@ export async function GET(request: Request) {
     return json({ code: "INVALID_FIXTURE", message: "Fixture ID is invalid." }, 400);
   }
 
+  let stage = "origin";
   try {
     const origin = settleTraceOrigin();
+    stage = "initial_resolution";
     let resolution = await loadResolution(origin, fixtureId, "participant1");
     const winner = finalWinner(resolution.body);
     if (winner && winner !== "participant1") {
+      stage = "winner_resolution";
       resolution = await loadResolution(origin, fixtureId, winner);
     }
 
+    stage = "receipt_integrity";
     const integrityVerified = await verifySettleTraceReceiptIntegrity(resolution.body);
+    stage = "summary";
     const verification = normalizeFanVerification(
       resolution.body,
       resolution.evidenceUrl.toString(),
@@ -92,7 +97,7 @@ export async function GET(request: Request) {
   } catch {
     return json(
       {
-        code: "RESULT_SOURCE_UNAVAILABLE",
+        code: `RESULT_${stage.toUpperCase()}_FAILED`,
         message: "The final-result evidence source is temporarily unavailable.",
       },
       502,
