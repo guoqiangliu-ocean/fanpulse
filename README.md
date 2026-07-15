@@ -59,9 +59,10 @@ score/odds snapshots for 12 seconds to reduce duplicate upstream calls.
 
 After a fan reveals the market pulse, the browser may call the same-origin
 `/api/final-result?fixtureId=...` route. It does not accept the fan's pick. The
-route calls the public SettleTrace resolution API server-to-server, determines
+route calls SettleTrace through a private Cloudflare Service Binding, determines
 the actual winning selection from the final score, then fetches that winner's
-predicate only when the initial selection lost.
+predicate only when the initial selection lost. The public SettleTrace URL is
+used only for the evidence link shown in the resulting receipt.
 
 Before the UI can say `HASH VERIFIED`, FanPulse requires a resolved final score,
 the matching winner predicate, on-chain proof, a ready consumer envelope with
@@ -77,8 +78,8 @@ when a device-local fan pick was made, or alter the pulse score.
 World Cup example. It is authenticated live evidence, not a synthetic replay
 and not presented as the currently selected match.
 
-`SETTLETRACE_ORIGIN` is an optional public service origin (it defaults to the
-public SettleTrace deployment); it is not a secret.
+The `SETTLETRACE` binding is configured in the Worker deployment, so no
+SettleTrace credential or public-origin override is placed in `.env` files.
 
 ## Evidence rules
 
@@ -133,10 +134,11 @@ FanPulse browser experience
   ├─ device-local score
   └─ Web Share / clipboard fallback
 
-SettleTrace public resolution API
+SettleTrace Worker
           │
           ▼
 FanPulse same-origin final-result route
+  ├─ private Cloudflare Service Binding
   ├─ resolve actual winner from final score
   ├─ verify canonical receipt SHA-256
   ├─ reject mismatched fixture / predicate / sequence
@@ -211,7 +213,7 @@ and odds snapshots by fixture ID would accelerate second-screen products.
 
 ## Status
 
-- Independent FanPulse product: complete and validated
+- Independent FanPulse product: complete; proof-receipt release verification in progress
 - Public repository: [github.com/guoqiangliu-ocean/fanpulse](https://github.com/guoqiangliu-ocean/fanpulse)
 - Public deployment: [fanpulse-world-cup.oddpulse-txline-2026.workers.dev](https://fanpulse-world-cup.oddpulse-txline-2026.workers.dev/)
 - Separate demo video: [watch the 4:42 walkthrough](https://fanpulse-world-cup.oddpulse-txline-2026.workers.dev/demo)

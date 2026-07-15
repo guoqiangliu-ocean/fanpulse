@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GET } from "../app/api/final-result/route.ts";
+import {
+  FinalResultSourceError,
+  parseFinalResultRequest,
+  resolveFinalResult,
+  type SettleTraceService,
+} from "../app/lib/final-result-service.ts";
 import { hashCanonicalReceipt } from "../app/lib/fan-verification.ts";
-
-const origin = "https://settletrace-test.example";
 
 async function resolutionPayload(args: {
   fixtureId: number;
@@ -97,45 +100,26 @@ function pendingPayload(fixtureId: number) {
   };
 }
 
-async function withFetch<T>(
-  handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
-  run: () => Promise<T>,
-) {
-  const originalFetch = globalThis.fetch;
-  const originalOrigin = process.env.SETTLETRACE_ORIGIN;
-  globalThis.fetch = handler as typeof fetch;
-  process.env.SETTLETRACE_ORIGIN = origin;
-  try {
-    return await run();
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalOrigin === undefined) delete process.env.SETTLETRACE_ORIGIN;
-    else process.env.SETTLETRACE_ORIGIN = originalOrigin;
-  }
-}
-
-test("rejects malformed fixture input before contacting the evidence source", async () => {
-  let calls = 0;
-  const response = await withFetch(
-    async () => {
-      calls += 1;
-      return new Response();
-    },
-    () => GET(new Request("https://fanpulse.example/api/final-result?fixtureId=nope")),
+test("rejects malformed fixture input before contacting the evidence service", () => {
+  assert.equal(
+    parseFinalResultRequest(
+      new URL("https://fanpulse.example/api/final-result?fixtureId=nope"),
+    ),
+    null,
   );
-  assert.equal(response.status, 400);
-  assert.equal(calls, 0);
-  assert.match(await response.text(), /INVALID_FIXTURE/);
+  assert.deepEqual(
+    parseFinalResultRequest(
+      new URL("https://fanpulse.example/api/final-result?example=completed"),
+    ),
+    { fixtureId: 18_179_550, example: true },
+  );
 });
 
 test("returns a fail-closed pending final-result state", async () => {
-  const response = await withFetch(
-    async () => new Response(JSON.stringify(pendingPayload(42)), { status: 200 }),
-    () => GET(new Request("https://fanpulse.example/api/final-result?fixtureId=42")),
-  );
-  const body = (await response.json()) as { verification: { status: string; receiptHash: unknown } };
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  const service: SettleTraceService = {
+    fetch: async () => new Response(JSON.stringify(pendingPayload(42)), { status: 200 }),
+  };
+  const body = await resolveFinalResult({ fixtureId: 42, example: false }, service);
   assert.equal(body.verification.status, "waiting");
   assert.equal(body.verification.receiptHash, null);
 });
@@ -160,36 +144,43 @@ test("retries the resolved market with the actual winner and returns only the ve
     outcome: "WIN",
   });
   const calls: string[] = [];
-  const redirectModes: (RequestRedirect | undefined)[] = [];
-  const response = await withFetch(
-    async (input, init) => {
-      const url = new URL(String(input));
+  const redirectModes: RequestRedirect[] = [];
+  const service: SettleTraceService = {
+    fetch: async (request) => {
+      const url = new URL(request.url);
       calls.push(url.searchParams.get("selection") ?? "");
-      redirectModes.push(init?.redirect);
-      return new Response(JSON.stringify(calls.length === 1 ? first : second), { status: 200 });
+      redirectModes.push(request.redirect);
+      return new Response(JSON.stringify(calls.length === 1 ? first : second), {
+        status: 200,
+      });
     },
-    () => GET(new Request("https://fanpulse.example/api/final-result?fixtureId=42")),
-  );
-  const body = (await response.json()) as {
-    verification: { status: string; winner: string; receiptHash: string };
   };
+  const body = await resolveFinalResult({ fixtureId: 42, example: false }, service);
   assert.deepEqual(calls, ["participant1", "participant2"]);
   assert.deepEqual(redirectModes, ["manual", "manual"]);
   assert.equal(body.verification.status, "verified");
   assert.equal(body.verification.winner, "participant2");
-  assert.match(body.verification.receiptHash, /^[a-f0-9]{64}$/);
+  assert.match(body.verification.receiptHash ?? "", /^[a-f0-9]{64}$/);
+  assert.match(
+    body.verification.evidenceUrl,
+    /^https:\/\/settletrace\.oddpulse-txline-2026\.workers\.dev\//,
+  );
   assert.doesNotMatch(JSON.stringify(body), /canonicalBody|transactionSubmitted|accountMetas/);
 });
 
-test("hides upstream failures behind a stable public error", async () => {
-  const response = await withFetch(
-    async () => {
+test("does not expose upstream failures through the service boundary", async () => {
+  const service: SettleTraceService = {
+    fetch: async () => {
       throw new Error("upstream secret detail");
     },
-    () => GET(new Request("https://fanpulse.example/api/final-result?fixtureId=42")),
+  };
+  await assert.rejects(
+    () => resolveFinalResult({ fixtureId: 42, example: false }, service),
+    (error: unknown) => {
+      assert.ok(error instanceof FinalResultSourceError);
+      assert.equal(error.stage, "INITIAL_RESOLUTION");
+      assert.doesNotMatch(error.message, /secret detail/);
+      return true;
+    },
   );
-  assert.equal(response.status, 502);
-  const body = await response.text();
-  assert.match(body, /RESULT_INITIAL_RESOLUTION_FAILED/);
-  assert.doesNotMatch(body, /secret detail/);
 });

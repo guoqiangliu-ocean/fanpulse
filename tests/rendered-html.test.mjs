@@ -16,10 +16,12 @@ test("builds the complete FanPulse experience and server entry", async () => {
   assert.doesNotMatch(client, /Your site is taking shape|Codex is working|codex-preview/);
 });
 
-test("keeps TxLINE credentials behind the server route", async () => {
-  const [route, finalResultRoute, client, envExample, gitignore] = await Promise.all([
+test("keeps TxLINE credentials and result verification behind server routes", async () => {
+  const [route, finalResultRoute, finalResultService, viteConfig, client, envExample, gitignore] = await Promise.all([
     readFile(new URL("../app/api/txline/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/final-result/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/final-result-service.ts", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/fanpulse.tsx", import.meta.url), "utf8"),
     readFile(new URL("../.env.example", import.meta.url), "utf8"),
     readFile(new URL("../.gitignore", import.meta.url), "utf8"),
@@ -32,8 +34,13 @@ test("keeps TxLINE credentials behind the server route", async () => {
   assert.match(client, /This proves the final match result/);
   assert.match(client, /\/api\/final-result/);
   assert.doesNotMatch(client, /SETTLETRACE_ORIGIN|settletrace\.oddpulse/);
-  assert.match(finalResultRoute, /verifySettleTraceReceiptIntegrity/);
-  assert.match(finalResultRoute, /redirect: "manual"/);
+  assert.match(finalResultRoute, /cloudflare:workers/);
+  assert.match(finalResultRoute, /SETTLETRACE/);
+  assert.match(finalResultService, /verifySettleTraceReceiptIntegrity/);
+  assert.match(finalResultService, /redirect: "manual"/);
+  assert.match(finalResultService, /https:\/\/settletrace\.service/);
+  assert.match(viteConfig, /binding: "SETTLETRACE"/);
+  assert.match(viteConfig, /service: "settletrace"/);
   assert.doesNotMatch(finalResultRoute, /TXLINE_API_TOKEN|TXLINE_SESSION_JWT/);
   assert.match(envExample, /^TXLINE_API_TOKEN=\s*$/m);
   assert.match(gitignore, /^\.env\*$/m);
