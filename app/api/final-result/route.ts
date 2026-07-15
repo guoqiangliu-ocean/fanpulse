@@ -17,7 +17,10 @@ const json = (body: unknown, status = 200) =>
   Response.json(body, { status, headers });
 
 function settleTraceOrigin() {
-  const configured = process.env.SETTLETRACE_ORIGIN || DEFAULT_SETTLETRACE_ORIGIN;
+  const runtime = globalThis as typeof globalThis & {
+    process?: { env?: Partial<Record<"SETTLETRACE_ORIGIN", string>> };
+  };
+  const configured = runtime.process?.env?.SETTLETRACE_ORIGIN || DEFAULT_SETTLETRACE_ORIGIN;
   const url = new URL(configured);
   if (url.protocol !== "https:") throw new TypeError("SettleTrace origin must use HTTPS.");
   return url.origin;
