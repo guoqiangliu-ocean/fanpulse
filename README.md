@@ -25,10 +25,16 @@ data-provenance rules.
 5. Reveal the exact current market snapshot and compare the pick with its
    leading outcome.
 6. See whether the same market series changed on the next source update.
-7. Share the pick through the Web Share API or a clipboard fallback.
+7. When a match finishes, check its final-result receipt through a separate
+   proof gate.
+8. Share the pick through the Web Share API or a clipboard fallback.
 
 Picks and the local score remain on the user's device. There is no global fan
 leaderboard and no claim that local picks represent crowd sentiment.
+
+The pulse score measures whether a fan matched the **current market leader** at
+reveal time. It is deliberately separate from the eventual match result and is
+never rewritten by the final-result receipt.
 
 ## TxLINE integration
 
@@ -48,6 +54,31 @@ Endpoints used:
 The app refreshes the selected fixture every 15 seconds only while the browser
 tab is visible. The server caches fixture metadata for 60 seconds and fixture
 score/odds snapshots for 12 seconds to reduce duplicate upstream calls.
+
+## Verified final results
+
+After a fan reveals the market pulse, the browser may call the same-origin
+`/api/final-result?fixtureId=...` route. It does not accept the fan's pick. The
+route calls the public SettleTrace resolution API server-to-server, determines
+the actual winning selection from the final score, then fetches that winner's
+predicate only when the initial selection lost.
+
+Before the UI can say `HASH VERIFIED`, FanPulse requires a resolved final score,
+the matching winner predicate, on-chain proof, a ready consumer envelope with
+no submitted transaction, and exact agreement among fixture ID, score sequence,
+final score, predicate, outcome, and receipt hash. It also recomputes the
+SHA-256 of SettleTrace's recursive-key-sorted canonical receipt body. Any
+mismatch stays pending or unavailable.
+
+This proof confirms a final match result. It does not execute settlement, prove
+when a device-local fan pick was made, or alter the pulse score.
+
+`/api/final-result?example=completed` provides one clearly labelled historical
+World Cup example. It is authenticated live evidence, not a synthetic replay
+and not presented as the currently selected match.
+
+`SETTLETRACE_ORIGIN` is an optional public service origin (it defaults to the
+public SettleTrace deployment); it is not a secret.
 
 ## Evidence rules
 
@@ -69,6 +100,11 @@ score/odds snapshots for 12 seconds to reduce duplicate upstream calls.
 - `In play` is shown only when the odds record explicitly sets
   `inRunning=true`.
 - Source time and retrieval time remain separate.
+- The final-result card fails closed unless finality, proof, canonical hash,
+  fixture, score, and winner checks all agree.
+- Receipt verification currently accepts only fixtures where
+  `participant1IsHome` is explicitly true, so the public participant mapping
+  cannot silently diverge from the canonical home/away predicate.
 
 The replay section uses fictional teams and deterministic synthetic values. It
 is labelled on the card itself and is never mixed into the authenticated view.
@@ -96,6 +132,18 @@ FanPulse browser experience
   ├─ exact-series update comparison
   ├─ device-local score
   └─ Web Share / clipboard fallback
+
+SettleTrace public resolution API
+          │
+          ▼
+FanPulse same-origin final-result route
+  ├─ resolve actual winner from final score
+  ├─ verify canonical receipt SHA-256
+  ├─ reject mismatched fixture / predicate / sequence
+  └─ return a minimal proof summary only
+          │
+          ▼
+Final-result receipt card (separate from pulse score)
 ```
 
 ## Local development
@@ -121,8 +169,9 @@ npm run lint
 The automated suite covers coherent percent/fraction vectors, mixed-scale and
 incomplete rejection, participant mapping, full-match market selection,
 multi-provider aggregation, raw-only behavior, exact-series change isolation,
-score-story output, server rendering, disclosure labels, and the server-only
-credential boundary.
+score-story output, server rendering, disclosure labels, the server-only
+credential boundary, final-result pending states, winner selection, canonical
+receipt SHA-256 validation, and fail-closed route behavior.
 
 ## Privacy and security
 
@@ -132,6 +181,10 @@ credential boundary.
   information are excluded from browser state and public output.
 - Device-local picks contain only fixture IDs, public outcome labels, and a
   correct/incorrect comparison with the revealed snapshot.
+- The final-result route returns a whitelisted summary rather than upstream
+  proof payloads, account metadata, RPC errors, or transaction construction
+  data. A historical reference transaction, when one exists upstream, is never
+  treated as a transaction submitted by FanPulse.
 - The worker sets a restrictive Content Security Policy, blocks framing, and
   disables camera, microphone, geolocation, payment, and USB permissions.
 - Upstream error details are replaced with stable public error codes.
@@ -163,6 +216,15 @@ and odds snapshots by fixture ID would accelerate second-screen products.
 - Public deployment: [fanpulse-world-cup.oddpulse-txline-2026.workers.dev](https://fanpulse-world-cup.oddpulse-txline-2026.workers.dev/)
 - Separate demo video: [watch the 4:42 walkthrough](https://fanpulse-world-cup.oddpulse-txline-2026.workers.dev/demo)
 - Superteam Consumer and Fan Experiences submission: submitted on 2026-07-14
+
+## Deployment check
+
+Build and deploy through the existing Cloudflare Worker workflow. The TxLINE
+secret is already provisioned and must not be printed or re-entered during an
+ordinary release. After deployment, check `/`, `/demo`, `/api/txline`, and
+`/api/final-result?example=completed`. The final endpoint must return a minimal
+`verification` object, `Cache-Control: no-store`, and no credential, proof
+payload, or raw upstream-error field.
 
 ## License
 

@@ -12,9 +12,19 @@ import {
   type TxLineMarket,
   type TxLineScoreEvent,
 } from "./lib/fan-pulse";
+import { type FanVerification } from "./lib/fan-verification";
 import styles from "./fanpulse.module.css";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
+type VerificationLoadState = "idle" | "loading" | "ready" | "error";
+
+type VerificationPanelState = {
+  state: VerificationLoadState;
+  data: FanVerification | null;
+  fixtureId?: number | null;
+};
+
+const IDLE_VERIFICATION_PANEL: VerificationPanelState = { state: "idle", data: null };
 
 type PickRecord = {
   fixtureId: number;
@@ -66,6 +76,93 @@ function fixtureLabel(fixture: TxLineFixture) {
   return `${fixture.participant1} vs ${fixture.participant2}`;
 }
 
+function compactHash(value: string | null) {
+  return value ? `${value.slice(0, 8)}…${value.slice(-6)}` : "Not issued";
+}
+
+async function requestVerification(path: string, signal: AbortSignal) {
+  const response = await fetch(path, { signal, cache: "no-store" });
+  const body = (await response.json()) as { verification?: FanVerification };
+  if (!response.ok || !body.verification) throw new Error("result_proof_unavailable");
+  return body.verification;
+}
+
+function ResultReceiptCard({
+  eyebrow,
+  panel,
+  idleMessage,
+  historical = false,
+}: {
+  eyebrow: string;
+  panel: VerificationPanelState;
+  idleMessage: string;
+  historical?: boolean;
+}) {
+  const verification = panel.data;
+  const badge =
+    panel.state === "loading"
+      ? "CHECKING"
+      : panel.state === "error"
+        ? "UNAVAILABLE"
+        : verification?.status === "verified"
+          ? "HASH VERIFIED"
+          : verification?.status === "waiting"
+            ? "WAITING"
+            : "NOT VERIFIED";
+  const title =
+    panel.state === "loading"
+      ? "Checking the final-result gate…"
+      : panel.state === "error"
+        ? "The proof service is temporarily unavailable"
+        : verification?.status === "verified"
+          ? `${verification.fixtureLabel}: final result verified`
+          : verification?.status === "waiting"
+            ? `${verification.fixtureLabel}: waiting for final proof`
+            : verification
+              ? `${verification.fixtureLabel}: no verified receipt`
+              : "Final-result proof appears here";
+  const statusClass = verification?.status ?? panel.state;
+
+  return (
+    <article className={`${styles.receiptCard} ${styles[`receipt_${statusClass}`] ?? ""}`}>
+      <div className={styles.receiptTopline}>
+        <span>{eyebrow}</span>
+        <strong>{badge}</strong>
+      </div>
+      <h3>{title}</h3>
+      <p className={styles.receiptLead}>
+        {verification?.message ??
+          (panel.state === "error"
+            ? "Your FanPulse experience still works. No result is promoted without proof."
+            : idleMessage)}
+      </p>
+      {verification ? (
+        <dl className={styles.receiptFacts}>
+          <div><dt>Final score</dt><dd>{verification.score ?? "Not final"}</dd></div>
+          <div><dt>Winner</dt><dd>{verification.winnerLabel ?? "Pending"}</dd></div>
+          <div><dt>Receipt</dt><dd>{compactHash(verification.receiptHash)}</dd></div>
+          <div><dt>Score sequence</dt><dd>{verification.scoreSequence ?? "Pending"}</dd></div>
+        </dl>
+      ) : null}
+      {verification ? (
+        <div className={styles.receiptLinks}>
+          <a href={verification.evidenceUrl} target="_blank" rel="noreferrer">
+            Inspect evidence JSON
+          </a>
+          <a href={verification.productUrl} target="_blank" rel="noreferrer">
+            Open SettleTrace
+          </a>
+        </div>
+      ) : null}
+      <p className={styles.receiptBoundary}>
+        {historical
+          ? "Historical, authenticated TxLINE evidence — not synthetic and not the current match."
+          : "This proves the final match result. It does not change your earlier pulse score or prove when your device-local pick was made."}
+      </p>
+    </article>
+  );
+}
+
 export function FanPulse() {
   const [fixtures, setFixtures] = useState<TxLineFixture[]>([]);
   const [fixtureState, setFixtureState] = useState<LoadState>("loading");
@@ -82,6 +179,12 @@ export function FanPulse() {
   const [shareStatuses, setShareStatuses] = useState<Record<number, string>>({});
   const [announcement, setAnnouncement] = useState("");
   const [replayFrame, setReplayFrame] = useState(0);
+  const [selectedVerification, setSelectedVerification] =
+    useState<VerificationPanelState>(IDLE_VERIFICATION_PANEL);
+  const [exampleVerification, setExampleVerification] = useState<VerificationPanelState>({
+    state: "loading",
+    data: null,
+  });
   const latestViews = useRef(new Map<number, FanMarketView>());
 
   useEffect(() => {
@@ -95,6 +198,18 @@ export function FanPulse() {
       }
     }, 0);
     return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    requestVerification("/api/final-result?example=completed", controller.signal)
+      .then((data) => setExampleVerification({ state: "ready", data }))
+      .catch((error: Error) => {
+        if (error.name !== "AbortError") {
+          setExampleVerification({ state: "error", data: null });
+        }
+      });
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -140,7 +255,8 @@ export function FanPulse() {
   useEffect(() => {
     if (!selectedFixture) return;
     const controller = new AbortController();
-    const fixtureId = selectedFixture.fixtureId;
+    const fixture = selectedFixture;
+    const fixtureId = fixture.fixtureId;
     async function loadFixturePulse() {
       setMarketState("loading");
       try {
@@ -160,7 +276,7 @@ export function FanPulse() {
         }
         const nextMarkets = Array.isArray(body.markets) ? body.markets : [];
         const nextScores = Array.isArray(body.scoreEvents) ? body.scoreEvents : [];
-        const nextView = buildFanMarketView(selectedFixture, nextMarkets);
+        const nextView = buildFanMarketView(fixture, nextMarkets);
         const storedView = latestViews.current.get(fixtureId) ?? null;
         setPreviousView(storedView);
         if (
@@ -172,7 +288,7 @@ export function FanPulse() {
           latestViews.current.set(fixtureId, nextView);
           if (storedView?.sourceAt && nextView.sourceAt) {
             setAnnouncement(
-              `New authenticated source update for ${fixtureLabel(selectedFixture)}.`,
+              `New authenticated source update for ${fixtureLabel(fixture)}.`,
             );
           }
         }
@@ -233,6 +349,35 @@ export function FanPulse() {
     (score, record) => score + (record.correct ? 1 : 0),
     0,
   );
+
+  useEffect(() => {
+    if (!selectedFixtureId || !selectedRecord) return;
+    const controller = new AbortController();
+    const fixtureId = selectedFixtureId;
+    requestVerification(
+      `/api/final-result?fixtureId=${fixtureId}`,
+      controller.signal,
+    )
+      .then((data) => {
+        setSelectedVerification({ state: "ready", data, fixtureId });
+        if (data.status === "verified") {
+          setAnnouncement(`Verified final result is ready for ${data.fixtureLabel}.`);
+        }
+      })
+      .catch((error: Error) => {
+        if (error.name !== "AbortError") {
+          setSelectedVerification({ state: "error", data: null, fixtureId });
+        }
+      });
+    return () => controller.abort();
+  }, [selectedFixtureId, selectedRecord]);
+
+  const selectedVerificationPanel: VerificationPanelState =
+    !selectedRecord
+      ? IDLE_VERIFICATION_PANEL
+      : selectedVerification.fixtureId === selectedFixtureId
+        ? selectedVerification
+        : { state: "loading", data: null };
 
   function updateShareStatus(value: string) {
     if (selectedFixtureId === null) return;
@@ -309,7 +454,7 @@ export function FanPulse() {
           </span>
         </a>
         <div className={styles.headerMeta}>
-          <span className={styles.localScore}>Local score · {localScore}/{pickRecords.length}</span>
+          <span className={styles.localScore}>Pulse score · {localScore}/{pickRecords.length}</span>
           <a href="#how-it-works">How it works</a>
         </div>
       </header>
@@ -321,19 +466,21 @@ export function FanPulse() {
           <p>
             Pick the outcome you think the current market leans toward. FanPulse
             reveals the authenticated TxLINE snapshot, explains what changed, and
-            tells you when the evidence is incomplete.
+            tells you when the evidence is incomplete, then closes finished matches with a
+            hash-checked SettleTrace result receipt.
           </p>
           <div className={styles.heroPills} aria-label="Product principles">
             <span>Phone first</span>
             <span>No wallet required</span>
             <span>No bets or profit claims</span>
+            <span>Verified final results</span>
           </div>
         </div>
         <aside className={styles.sourceCard} aria-label="Data source status">
           <span className={styles.liveDot} aria-hidden="true" />
           <small>DATA SOURCE</small>
           <strong>TxLINE {network.toUpperCase()}</strong>
-          <p>Server-authenticated snapshots. Refreshes every 15 seconds while visible.</p>
+          <p>Server-authenticated snapshots, plus a fail-closed final-result proof gate.</p>
           <time dateTime={fetchedAt ? new Date(fetchedAt).toISOString() : undefined}>
             Retrieved {formatSourceTime(fetchedAt)}
           </time>
@@ -513,6 +660,33 @@ export function FanPulse() {
           </aside>
         </section>
       ) : null}
+
+      <section className={styles.receiptSection} aria-labelledby="receipt-heading">
+        <div className={styles.receiptHeading}>
+          <div>
+            <p className={styles.kicker}>04 · CLOSE THE LOOP</p>
+            <h2 id="receipt-heading">A result badge that earns its word “verified.”</h2>
+          </div>
+          <p>
+            FanPulse waits for finality, verifies the canonical receipt SHA-256 on the
+            server, and fails closed if the fixture, winner, score sequence, predicate,
+            or execution boundary does not match.
+          </p>
+        </div>
+        <div className={styles.receiptGrid}>
+          <ResultReceiptCard
+            eyebrow="YOUR SELECTED MATCH · FINAL RESULT"
+            panel={selectedVerificationPanel}
+            idleMessage="Reveal a pulse pick first. The result gate stays separate from your device-local pulse score."
+          />
+          <ResultReceiptCard
+            eyebrow="COMPLETED PROOF EXAMPLE · LIVE DATA"
+            panel={exampleVerification}
+            idleMessage="Loading a completed, independently verifiable result example."
+            historical
+          />
+        </div>
+      </section>
 
       <section className={styles.replaySection} id="how-it-works">
         <div className={styles.replayIntro}>

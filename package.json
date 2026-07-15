@@ -11,7 +11,7 @@
     "dev": "node scripts/vinext.mjs dev",
     "build": "node scripts/vinext.mjs build",
     "start": "node scripts/vinext.mjs start",
-    "test": "npm run build && node --test tests/fan-pulse.test.ts tests/rendered-html.test.mjs",
+    "test": "npm run build && node --test tests/fan-pulse.test.ts tests/fan-verification.test.ts tests/final-result-route.test.ts tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {

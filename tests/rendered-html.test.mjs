@@ -17,8 +17,9 @@ test("builds the complete FanPulse experience and server entry", async () => {
 });
 
 test("keeps TxLINE credentials behind the server route", async () => {
-  const [route, client, envExample, gitignore] = await Promise.all([
+  const [route, finalResultRoute, client, envExample, gitignore] = await Promise.all([
     readFile(new URL("../app/api/txline/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/final-result/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/fanpulse.tsx", import.meta.url), "utf8"),
     readFile(new URL("../.env.example", import.meta.url), "utf8"),
     readFile(new URL("../.gitignore", import.meta.url), "utf8"),
@@ -28,6 +29,12 @@ test("keeps TxLINE credentials behind the server route", async () => {
   assert.match(route, /FIXTURE_NOT_AVAILABLE/);
   assert.match(client, /fetch\("\/api\/txline"/);
   assert.doesNotMatch(client, /TXLINE_API_TOKEN|X-Api-Token|Authorization/);
+  assert.match(client, /This proves the final match result/);
+  assert.match(client, /\/api\/final-result/);
+  assert.doesNotMatch(client, /SETTLETRACE_ORIGIN|settletrace\.oddpulse/);
+  assert.match(finalResultRoute, /verifySettleTraceReceiptIntegrity/);
+  assert.match(finalResultRoute, /redirect: "error"/);
+  assert.doesNotMatch(finalResultRoute, /TXLINE_API_TOKEN|TXLINE_SESSION_JWT/);
   assert.match(envExample, /^TXLINE_API_TOKEN=\s*$/m);
   assert.match(gitignore, /^\.env\*$/m);
   assert.match(gitignore, /^!\.env\.example$/m);
